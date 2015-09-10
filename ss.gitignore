@@ -1,0 +1,27 @@
+#IDE files
+.idea/
+*.iml
+*.ipr
+*.iws
+
+#Gradle files
+.gradle/
+gradle-app.setting
+settings.gradle~
+
+#Build targets and binaries
+target/
+build/
+*/build/
+out/
+lib/
+*.class
+
+tmp/
+
+*.hprof
+
+
+build.out
+gradlew
+gradlew.bat

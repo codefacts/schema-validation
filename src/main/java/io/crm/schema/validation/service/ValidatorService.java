@@ -1,10 +1,10 @@
 package io.crm.schema.validation.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.util.BeanUtil;
-import com.sun.org.apache.xpath.internal.operations.Bool;
-import freemarker.ext.beans.BeansWrapperBuilder;
+import io.crm.FailureCode;
+import io.crm.Operation;
 import io.crm.QC;
+import io.crm.intfs.BiConsumerUnchecked;
 import io.crm.intfs.ConsumerInterface;
 import io.crm.mc;
 import io.crm.model.EmployeeType;
@@ -12,15 +12,12 @@ import io.crm.model.User;
 import io.crm.schema.validation.App;
 import io.crm.schema.validation.model.Area;
 import io.crm.schema.validation.model.Campaign;
-import io.crm.util.ErrorBuilder;
-import io.crm.util.ExceptionUtil;
-import io.crm.util.TaskCoordinator;
-import io.crm.util.TaskCoordinatorBuilder;
+import io.crm.util.*;
+import io.vertx.core.MultiMap;
 import io.vertx.core.eventbus.Message;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.mongo.MongoClient;
-import org.springframework.beans.BeanUtils;
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
 
 import javax.validation.ConstraintViolation;
@@ -29,6 +26,7 @@ import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 import static io.crm.util.ExceptionUtil.withReply;
+import static io.crm.util.Util.EMPTY_JSON_ARRAY;
 import static io.crm.util.Util.parseMongoDate;
 import static io.crm.util.Util.toJsonObject;
 
@@ -59,6 +57,10 @@ final public class ValidatorService {
     }
 
     public void validateCampaign(final Message<JsonObject> message) throws Exception {
+        final MultiMap headers = message.headers();
+        if (!headers.contains(QC.operation)) headers.set(QC.operation, Operation.create.name());
+
+        final Operation operation = Operation.valueOf(headers.get(QC.operation));
         final JsonObject campaignJson = message.body();
         final ErrorBuilder errorBuilder = new ErrorBuilder();
 
@@ -81,15 +83,66 @@ final public class ValidatorService {
 
         final Campaign campaign = parseJson(campaignJson.encode(), Campaign.class);
         final Set<ConstraintViolation<Campaign>> violations = validator.validate(campaign);
+        errorBuilder.putAll(serialize(violations).getList());
 
-
-
-        message.reply(
-                new JsonArray(violations.stream().map(v -> serialize(v)).collect(Collectors.toList())));
+        switch (operation) {
+            case create:
+                ensureIdExists(mc.campaigns, campaign.get_id(), exists -> {
+                    if (!exists) {
+                        errorBuilder.put(QC.id, "Campaign Id is required.");
+                    }
+                    ensureNameNotExists(mc.campaigns, campaign.getName(), nameNotExists -> {
+                        if (!nameNotExists) {
+                            errorBuilder.put(QC.name, "Name already exists. Name must be unique. Please choose a different name.");
+                        }
+                        campaignValidate(campaign, campaignJson, errorBuilder, message);
+                    }, message);
+                }, message);
+                break;
+            case update:
+                ensureIdExistsAndNameModified(mc.campaigns, campaign.get_id(), campaign.getName(), (idExists, nameModified) -> {
+                    if (!idExists) {
+                        errorBuilder.put(QC.id, "Campaign Id is required.");
+                    }
+                    if (nameModified) {
+                        ensureNameNotExists(mc.campaigns, campaign.getName(), nameNotExists -> {
+                            if (!nameNotExists) {
+                                errorBuilder.put(QC.name, "Name already exists. Name must be unique. Please choose a different name.");
+                            }
+                            campaignValidate(campaign, campaignJson, errorBuilder, message);
+                        }, message);
+                    }
+                    campaignValidate(campaign, campaignJson, errorBuilder, message);
+                }, message);
+                break;
+            default:
+                message.fail(FailureCode.BadRequest.code, "Operation type for validation is missing.");
+        }
     }
 
-    private void validateTree(final JsonArray tree, final BiConsumer<JsonArray, ErrorBuilder> biConsumer, final Message message) {
-        final ErrorBuilder errorBuilder = new ErrorBuilder();
+    private <T> void campaignValidate(Campaign campaign, final JsonObject campaignJson, final ErrorBuilder errorBuilder, final Message message) {
+
+        ensureBrandExists(campaign.getBrand(), brandExists -> {
+            if (!brandExists) {
+                errorBuilder.put(QC.brandId, "Brand Id does not exists. Please specify a valid brand ID.");
+            }
+
+            validateTree(
+                    campaignJson
+                            .getJsonArray(
+                                    QC.tree, EMPTY_JSON_ARRAY),
+                    errorBuilder,
+                    (tree, eb) -> {
+
+                        message.reply(
+                                new JsonObject()
+                                        .put(QC.data, campaignJson)
+                                        .put(QC.violations, errorBuilder.build()));
+                    }, message);
+        }, message);
+    }
+
+    private void validateTree(final JsonArray tree, final ErrorBuilder errorBuilder, final BiConsumer<JsonArray, ErrorBuilder> biConsumer, final Message message) {
         final List<JsonObject> regionList = tree.stream().map(v -> toJsonObject(v)).collect(Collectors.toList());
 
         final TaskCoordinator taskCoordinator = new TaskCoordinatorBuilder()
@@ -127,7 +180,7 @@ final public class ValidatorService {
                                     return;
                                 }
 
-                                checkParent(aList, areaList, errorBuilder, QC.region, QC.area, QC.areaRegionId);
+                                checkParents(aList, areaList, errorBuilder, QC.region, QC.area, QC.areaRegionId);
 
                                 Map<Long, JsonObject> houseList = collect(areaList.values(), mc.distributionHouses.name(), QC.area);
 
@@ -144,7 +197,7 @@ final public class ValidatorService {
                                                 return;
                                             }
 
-                                            checkParent(hList, houseList, errorBuilder, QC.area, QC.distributionHouse, QC.distributionHouseAreaId);
+                                            checkParents(hList, houseList, errorBuilder, QC.area, QC.distributionHouse, QC.distributionHouseAreaId);
 
                                             final Map<Long, JsonObject> locationList = collect(houseList.values(), mc.locations.name(), QC.distributionHouse);
 
@@ -158,7 +211,7 @@ final public class ValidatorService {
                                                             return;
                                                         }
 
-                                                        checkParent(lList, locationList, errorBuilder, QC.distributionHouse, QC.location, QC.locationDistributionHouseId);
+                                                        checkParents(lList, locationList, errorBuilder, QC.distributionHouse, QC.location, QC.locationDistributionHouseId);
                                                     }));
 
                                             final Map<String, JsonObject> brList = collectUser(houseList.values(), QC.brs, QC.distributionHouse);
@@ -177,7 +230,7 @@ final public class ValidatorService {
                                                             return;
                                                         }
 
-                                                        checkParentForUser(bList, brList, errorBuilder, QC.distributionHouse, QC.br, QC.brDistributionHouseId);
+                                                        checkParentsForUsers(bList, brList, errorBuilder, QC.distributionHouse, QC.br, QC.brDistributionHouseId);
                                                     }));
 
                                             final Map<String, JsonObject> brSupervisorList = collectUser(houseList.values(), QC.brSupervisors, QC.distributionHouse);
@@ -197,7 +250,7 @@ final public class ValidatorService {
                                                             return;
                                                         }
 
-                                                        checkParentForUser(supList, brSupervisorList, errorBuilder, QC.distributionHouse, QC.brSupervisor, QC.brSupervisorDistributionHouseId);
+                                                        checkParentsForUsers(supList, brSupervisorList, errorBuilder, QC.distributionHouse, QC.brSupervisor, QC.brSupervisorDistributionHouseId);
                                                     }));
                                         }));
 
@@ -219,10 +272,28 @@ final public class ValidatorService {
                                                 return;
                                             }
 
-                                            checkParentForUser(acList, areaCoordinatorList, errorBuilder, QC.area, QC.areaCoordinator, QC.areaCoordinatorAreaId);
+                                            checkParentsForUsers(acList, areaCoordinatorList, errorBuilder, QC.area, QC.areaCoordinator, QC.areaCoordinatorAreaId);
                                         }));
                             }));
                 }));
+    }
+
+    public void ensureBrandExists(final long brandId, final ConsumerInterface<Boolean> consumerInterface, final Message message) {
+        ensureIdExists(mc.brands, brandId, consumerInterface, message);
+    }
+
+    public void ensureIdExistsAndNameModified(final mc dbName, final long id, final String name, final BiConsumerUnchecked<Boolean, Boolean> biConsumer, final Message message) {
+        mongoClient.findOne(dbName.name(),
+                new JsonObject()
+                        .put(QC.id, id),
+                new JsonObject()
+                        .put(QC.id, 1)
+                        .put(QC.name, 1),
+                withReply(obj -> {
+                    biConsumer.accept(obj != null, !name.equals(
+                                    obj.getString(QC.name))
+                    );
+                }, message));
     }
 
     public void ensureIdExists(final mc dbName, final long id, final ConsumerInterface<Boolean> consumer, final Message message) {
@@ -233,11 +304,9 @@ final public class ValidatorService {
                 }, message));
     }
 
-    public void ensureNameModified(final mc dbName, final long id, final String name, final ConsumerInterface<Boolean> consumer, final Message message) {
+    public void ensureIdNotExists(final mc dbName, final long id, final ConsumerInterface<Boolean> consumer, final Message message) {
         mongoClient.count(dbName.name(),
-                new JsonObject()
-                        .put(QC.id, id)
-                        .put(QC.name, name),
+                new JsonObject().put(QC.id, id),
                 withReply(count -> {
                     consumer.accept(count <= 0);
                 }, message));
@@ -252,31 +321,31 @@ final public class ValidatorService {
                 }, message));
     }
 
-    private void checkParentForUser(final List<JsonObject> uList, final Map<String, JsonObject> userList, final ErrorBuilder errorBuilder, final String parent, final String child, final String errorField) {
+    private void checkParentsForUsers(final List<JsonObject> uListFromDB, final Map<String, JsonObject> userListToCheckAgainst, final ErrorBuilder errorBuilder, final String parent, final String child, final String errorField) {
         try {
-            uList.forEach(user -> {
+            uListFromDB.forEach(user -> {
                 if (!user.getJsonObject(parent).getLong(QC.id).equals(
-                        userList.get(user.getString(QC.userId))
+                        userListToCheckAgainst.get(user.getString(QC.userId))
                                 .getJsonObject(parent).getLong(QC.id))) {
                     errorBuilder.put(errorField, String.format("The " + parent + " ID %d for " + child + " id %d is incorrect.",
-                            userList.get(user.getString(QC.userId))
+                            userListToCheckAgainst.get(user.getString(QC.userId))
                                     .getJsonObject(parent).getLong(QC.id), user.getString(QC.userId)));
                 }
-                userList.get(user.getString(QC.userId)).put(QC.id, user.getLong(QC.id));
+                userListToCheckAgainst.get(user.getString(QC.userId)).put(QC.id, user.getLong(QC.id));
             });
         } catch (NullPointerException ex) {
             ex.printStackTrace();
         }
     }
 
-    private void checkParent(final List<JsonObject> aList, final Map<Long, JsonObject> areaList, final ErrorBuilder errorBuilder, final String parent, final String child, final String field) {
+    private void checkParents(final List<JsonObject> listFromDB, final Map<Long, JsonObject> listToCheckAgainst, final ErrorBuilder errorBuilder, final String parentField, final String errorFieldLabel, final String errorField) {
         try {
-            aList.forEach(area -> {
-                if (!area.getJsonObject(parent).getLong(QC.id).equals(
-                        areaList.get(area.getLong(QC.id))
-                                .getJsonObject(parent).getLong(QC.id))) {
-                    errorBuilder.put(field, String.format("The " + parent + " ID %d for " + child + " id %d is incorrect.",
-                            areaList.get(area.getLong(QC.id)).getJsonObject(parent).getLong(QC.id), area.getLong(QC.id)));
+            listFromDB.forEach(area -> {
+                if (!area.getJsonObject(parentField).getLong(QC.id).equals(
+                        listToCheckAgainst.get(area.getLong(QC.id))
+                                .getJsonObject(parentField).getLong(QC.id))) {
+                    errorBuilder.put(errorField, String.format("The " + parentField + " ID %d for " + errorFieldLabel + " id %d is incorrect.",
+                            listToCheckAgainst.get(area.getLong(QC.id)).getJsonObject(parentField).getLong(QC.id), area.getLong(QC.id)));
                 }
             });
         } catch (NullPointerException ex) {
@@ -356,6 +425,10 @@ final public class ValidatorService {
             return ((JsonObject) o).getString(QC.$date);
         }
         return o.toString();
+    }
+
+    private <T> JsonArray serialize(final Collection<ConstraintViolation<T>> violations) {
+        return new JsonArray(violations.stream().map((ConstraintViolation<T> v) -> serialize(v)).collect(Collectors.toList()));
     }
 
     public static <T> JsonObject serialize(final ConstraintViolation<T> violation) {

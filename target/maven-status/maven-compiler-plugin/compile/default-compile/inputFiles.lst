@@ -6,7 +6,9 @@ D:\IdeaProjects\schema-validation\src\main\java\io\crm\schema\validation\model\C
 D:\IdeaProjects\schema-validation\src\main\java\io\crm\schema\validation\model\Brand.java
 D:\IdeaProjects\schema-validation\src\main\java\io\crm\schema\validation\model\Region.java
 D:\IdeaProjects\schema-validation\src\main\java\io\crm\schema\validation\model\Campaign.java
+D:\IdeaProjects\schema-validation\src\main\java\io\crm\schema\validation\util\Violation.java
 D:\IdeaProjects\schema-validation\src\main\java\io\crm\schema\validation\model\House.java
+D:\IdeaProjects\schema-validation\src\main\java\io\crm\schema\validation\util\ValidationUtil.java
 D:\IdeaProjects\schema-validation\src\main\java\io\crm\schema\validation\MainVerticle.java
 D:\IdeaProjects\schema-validation\src\main\java\io\crm\schema\validation\model\Address.java
 D:\IdeaProjects\schema-validation\src\main\java\io\crm\schema\validation\model\UserType.java
@@ -15,4 +17,5 @@ D:\IdeaProjects\schema-validation\src\main\java\io\crm\schema\validation\model\A
 D:\IdeaProjects\schema-validation\src\main\java\io\crm\schema\validation\model\Location.java
 D:\IdeaProjects\schema-validation\src\main\java\io\crm\schema\validation\model\Consumer.java
 D:\IdeaProjects\schema-validation\src\main\java\io\crm\schema\validation\service\ValidatorService.java
+D:\IdeaProjects\schema-validation\src\main\java\io\crm\schema\validation\util\ViolationBuilder.java
 D:\IdeaProjects\schema-validation\src\main\java\io\crm\schema\validation\model\BrSupervisor.java

@@ -3,7 +3,7 @@ package io.crm.schema.validation;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.crm.Events;
 import io.crm.QC;
-import io.crm.intfs.ConsumerInterface;
+import io.crm.intfs.ConsumerUnchecked;
 import io.crm.schema.validation.service.ValidatorService;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
@@ -49,7 +49,7 @@ public class MainVerticle extends AbstractVerticle {
         stopFuture.complete();
     }
 
-    private Handler<Message<Object>> consumer(final ConsumerInterface<Message> consumer) {
+    private Handler<Message<Object>> consumer(final ConsumerUnchecked<Message> consumer) {
         return message -> {
             try {
                 consumer.accept(message);

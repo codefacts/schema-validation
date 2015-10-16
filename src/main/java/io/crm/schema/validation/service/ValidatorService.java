@@ -5,7 +5,7 @@ import io.crm.FailureCode;
 import io.crm.Operation;
 import io.crm.QC;
 import io.crm.intfs.BiConsumerUnchecked;
-import io.crm.intfs.ConsumerInterface;
+import io.crm.intfs.ConsumerUnchecked;
 import io.crm.mc;
 import io.crm.model.EmployeeType;
 import io.crm.model.User;
@@ -278,8 +278,8 @@ final public class ValidatorService {
                 }));
     }
 
-    public void ensureBrandExists(final long brandId, final ConsumerInterface<Boolean> consumerInterface, final Message message) {
-        ensureIdExists(mc.brands, brandId, consumerInterface, message);
+    public void ensureBrandExists(final long brandId, final ConsumerUnchecked<Boolean> consumerUnchecked, final Message message) {
+        ensureIdExists(mc.brands, brandId, consumerUnchecked, message);
     }
 
     public void ensureIdExistsAndNameModified(final mc dbName, final long id, final String name, final BiConsumerUnchecked<Boolean, Boolean> biConsumer, final Message message) {
@@ -296,7 +296,7 @@ final public class ValidatorService {
                 }, message));
     }
 
-    public void ensureIdExists(final mc dbName, final long id, final ConsumerInterface<Boolean> consumer, final Message message) {
+    public void ensureIdExists(final mc dbName, final long id, final ConsumerUnchecked<Boolean> consumer, final Message message) {
         mongoClient.count(dbName.name(),
                 new JsonObject().put(QC.id, id),
                 withReply(count -> {
@@ -304,7 +304,7 @@ final public class ValidatorService {
                 }, message));
     }
 
-    public void ensureIdNotExists(final mc dbName, final long id, final ConsumerInterface<Boolean> consumer, final Message message) {
+    public void ensureIdNotExists(final mc dbName, final long id, final ConsumerUnchecked<Boolean> consumer, final Message message) {
         mongoClient.count(dbName.name(),
                 new JsonObject().put(QC.id, id),
                 withReply(count -> {
@@ -312,7 +312,7 @@ final public class ValidatorService {
                 }, message));
     }
 
-    public void ensureNameNotExists(final mc dbName, final String name, final ConsumerInterface<Boolean> consumer, final Message message) {
+    public void ensureNameNotExists(final mc dbName, final String name, final ConsumerUnchecked<Boolean> consumer, final Message message) {
         mongoClient.count(dbName.name(),
                 new JsonObject()
                         .put(QC.name, name),
